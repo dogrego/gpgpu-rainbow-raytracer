@@ -7,17 +7,56 @@ Vec3 reflect(const Vec3 &I, const Vec3 &N)
     return I - N * 2.0f * N.dot(I);
 }
 
-bool intersectRaySphere(const Vec3& origin, const Vec3& dir, const Sphere& sphere, float& t) {
-    Vec3 oc = origin - sphere.center;
-    float b = 2.0f * oc.dot(dir);
-    float c = oc.dot(oc) - sphere.radius * sphere.radius;
-    float discriminant = b * b - 4.0f * c;
+Vec3 refract(const Vec3& incident, const Vec3& normal, float n1, float n2)
+{
+    float ratio = n1 / n2;                                               // Refractive index ratio
+    float cosI = -std::max(-1.0f, std::min(1.0f, incident.dot(normal))); // Clamp the dot product to [-1, 1]
+    float sinT2 = ratio * ratio * (1.0f - cosI * cosI);                  // Sine squared of the refraction angle
 
-    if (discriminant > 0) {
-        t = (-b - std::sqrt(discriminant)) / 2.0f;
-        return t > 0;
+    if (sinT2 > 1.0f)
+        return Vec3(0, 0, 0); // Total internal reflection: return zero vector
+
+    float cosT = std::sqrt(1.0f - sinT2);                     // Cosine of the refraction angle
+    return incident * ratio + normal * (ratio * cosI - cosT); // Refraction direction
+}
+
+float fresnel(const Vec3& incident, const Vec3& normal, float n1, float n2)
+{
+    float cosI = -std::max(-1.0f, std::min(1.0f, incident.dot(normal))); // Cosine of the angle of incidence
+    float sinT2 = (n1 / n2) * (n1 / n2) * (1.0f - cosI * cosI);          // Sine squared of the angle of refraction
+
+    if (sinT2 > 1.0f)
+        return 1.0f; // Total internal reflection: return maximum reflectance
+
+    float cosT = std::sqrt(1.0f - sinT2);                                             // Cosine of the angle of refraction
+    float rParallel = ((n2 * cosI) - (n1 * cosT)) / ((n2 * cosI) + (n1 * cosT));      // Reflection for parallel polarization
+    float rPerpendicular = ((n1 * cosI) - (n2 * cosT)) / ((n1 * cosI) + (n2 * cosT)); // Reflection for perpendicular polarization
+
+    return (rParallel * rParallel + rPerpendicular * rPerpendicular) / 2.0f; // Average reflection
+}
+
+bool intersectRaySphere(const Vec3& origin, const Vec3& dir, const Sphere& sphere, float& t)
+{
+    Vec3 oc = origin - sphere.center;                     // Vector from ray origin to sphere center
+    float b = 2.0f * oc.dot(dir);                         // Dot product term for the quadratic equation
+    float c = oc.dot(oc) - sphere.radius * sphere.radius; // Constant term for the quadratic equation
+    float discriminant = b * b - 4.0f * c;                // Discriminant of the quadratic equation
+
+    // If the discriminant is positive, there are real intersections
+    if (discriminant > 0)
+    {
+        t = (-b - std::sqrt(discriminant)) / 2.0f; // Calculate the intersection distance
+        return t > 0;                              // If t is positive, the intersection occurs in the direction of the ray
     }
+
+    // No intersection
     return false;
+}
+
+float wavelengthToRefraction(float wavelength)
+{
+    // a simplified empirical approximation of the Sellmeier equation
+    return 1.31477 + 0.0108148 / (std::log10(0.00690246 * wavelength));
 }
 
 Color wavelengthToRGB(float wavelength)
@@ -92,44 +131,7 @@ std::ostream &operator<<(std::ostream &os, const Vec3 &v)
 }
 
 int main() {
-    // Quick visual check of key colors
-    std::cout << "Quick Color Check:\n";
-    std::cout << "380nm (Violet): ";
-    std::cout << static_cast<int>(wavelengthToRGB(380).r) << ","
-        << static_cast<int>(wavelengthToRGB(380).g) << ","
-        << static_cast<int>(wavelengthToRGB(380).b) << "\n";
 
-    std::cout << "470nm (Blue):   ";
-    std::cout << static_cast<int>(wavelengthToRGB(470).r) << ","
-        << static_cast<int>(wavelengthToRGB(470).g) << ","
-        << static_cast<int>(wavelengthToRGB(470).b) << "\n";
-
-    std::cout << "520nm (Green):  ";
-    std::cout << static_cast<int>(wavelengthToRGB(520).r) << ","
-        << static_cast<int>(wavelengthToRGB(520).g) << ","
-        << static_cast<int>(wavelengthToRGB(520).b) << "\n";
-
-    std::cout << "580nm (Yellow): ";
-    std::cout << static_cast<int>(wavelengthToRGB(580).r) << ","
-        << static_cast<int>(wavelengthToRGB(580).g) << ","
-        << static_cast<int>(wavelengthToRGB(580).b) << "\n";
-
-    std::cout << "650nm (Red):    ";
-    std::cout << static_cast<int>(wavelengthToRGB(650).r) << ","
-        << static_cast<int>(wavelengthToRGB(650).g) << ","
-        << static_cast<int>(wavelengthToRGB(650).b) << "\n";
-
-    // Check invisible wavelengths
-    std::cout << "\nInvisible Check:\n";
-    std::cout << "300nm (UV):     ";
-    std::cout << static_cast<int>(wavelengthToRGB(300).r) << ","
-        << static_cast<int>(wavelengthToRGB(300).g) << ","
-        << static_cast<int>(wavelengthToRGB(300).b) << "\n";
-
-    std::cout << "800nm (IR):     ";
-    std::cout << static_cast<int>(wavelengthToRGB(800).r) << ","
-        << static_cast<int>(wavelengthToRGB(800).g) << ","
-        << static_cast<int>(wavelengthToRGB(800).b) << "\n";
 
     return 0;
 }
