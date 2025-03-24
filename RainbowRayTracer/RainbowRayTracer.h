@@ -44,4 +44,6 @@ struct Light
     float wavelength;
 };
 
+Vec3 reflect(const Vec3& I, const Vec3& N);
+
 #endif // RAINBOWRAYTRACER_H
