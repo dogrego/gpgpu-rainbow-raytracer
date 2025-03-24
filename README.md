@@ -24,8 +24,6 @@ The process is as follows:
 
 Use **vectorization** to follow multiple rays with each thread (CUDA) to improve performance.
 
-
-
 ## Milestones
 
 - [ ] Correct implementation of the 3D geometry and refraction/reflection computation on the CPU
@@ -33,6 +31,7 @@ Use **vectorization** to follow multiple rays with each thread (CUDA) to improve
 - [ ] Correct implementation of a vectorized version and performance comparison with the non-vectorized one
 - [ ] Color display as a static image file
 - [ ] Color display with OpenGL on the screen, with interactively changeable viewing angle
+- [ ] Compute the intensity changes properly at the intersections using the Fresnel equations assuming unpolarized light
 
 ## Requirements
 
