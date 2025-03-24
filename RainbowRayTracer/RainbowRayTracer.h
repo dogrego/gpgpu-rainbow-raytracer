@@ -46,5 +46,6 @@ struct Light
 
 Vec3 reflect(const Vec3& I, const Vec3& N);
 bool intersectRaySphere(const Vec3& origin, const Vec3& dir, const Sphere& sphere, float& t);
+Color wavelengthToRGB(float wavelength);
 
 #endif // RAINBOWRAYTRACER_H
