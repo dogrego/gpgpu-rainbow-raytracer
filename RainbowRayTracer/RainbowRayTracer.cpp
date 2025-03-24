@@ -10,11 +10,41 @@
 #define CHANNEL_NUM 4 // the number of color channels per pixel
 #define MAX_BOUNCES 4 // the maximum number of times a light ray can bounce or interact with the sphere during the ray tracing process
 
+/**
+ * Computes perfect reflection direction (R = I - 2·N(N·I))
+ *
+ * Implements the standard reflection equation for ideal mirrors:
+ * R = I - 2·N(N·I) where:
+ * - I: Incident direction (unit vector)
+ * - N: Surface normal (unit vector)
+ * - R: Reflected direction (unit vector)
+ *
+ * @param I Incident direction (must be normalized)
+ * @param N Surface normal (must be normalized)
+ * @return Reflected direction (normalized)
+ *
+ * Note: Equivalent to GLSL reflect() function.
+ *       Maintains input vector normalization.
+ */
 Vec3 reflect(const Vec3 &I, const Vec3 &N)
 {
     return I - N * 2.0f * N.dot(I);
 }
 
+/**
+ * Computes refraction direction using Snell's law.
+ *
+ * Implements:
+ * n₁·sinθ₁ = n₂·sinθ₂
+ * Returns zero vector for total internal reflection (when sinθ₂ > 1)
+ *
+ * @param incident Incident direction (unit vector)
+ * @param normal   Surface normal (unit vector)
+ * @param n1       Refractive index of origin medium (η₁)
+ * @param n2       Refractive index of destination medium (η₂)
+ * @return Refracted direction (unit vector if valid) or
+ *         zero vector for total internal reflection
+ */
 Vec3 refract(const Vec3 &incident, const Vec3 &normal, float n1, float n2)
 {
     float ratio = n1 / n2;                                               // Refractive index ratio
@@ -28,6 +58,22 @@ Vec3 refract(const Vec3 &incident, const Vec3 &normal, float n1, float n2)
     return incident * ratio + normal * (ratio * cosI - cosT); // Refraction direction
 }
 
+/**
+ * Fresnel equations for reflection and refraction blending
+ *
+ * Implements the Fresnel equations for unpolarized light:
+ * R = ½(R_∥ + R_⊥) where:
+ * R_∥ = ((n₂·cosθ₁ - n₁·cosθ₂)/(n₂·cosθ₁ + n₁·cosθ₂))²
+ * R_⊥ = ((n₁·cosθ₁ - n₂·cosθ₂)/(n₁·cosθ₁ + n₂·cosθ₂))²
+ *
+ * @param incident Incident ray direction (unit vector)
+ * @param normal   Surface normal (unit vector)
+ * @param n1       Refractive index of origin medium
+ * @param n2       Refractive index of destination medium
+ * @return Reflectance ∈ [0.0,1.0] where:
+ *         0.0 = full transmission
+ *         1.0 = total internal reflection (when sinθ₂ > 1.0)
+ */
 float fresnel(const Vec3 &incident, const Vec3 &normal, float n1, float n2)
 {
     float cosI = -std::max(-1.0f, std::min(1.0f, incident.dot(normal))); // Cosine of the angle of incidence
@@ -43,6 +89,20 @@ float fresnel(const Vec3 &incident, const Vec3 &normal, float n1, float n2)
     return (rParallel * rParallel + rPerpendicular * rPerpendicular) / 2.0f; // Average reflection
 }
 
+/**
+ * Tests ray-sphere intersection using geometric solution.
+ *
+ * Solves quadratic equation: t² + 2b·t + c = 0
+ * where:
+ *   b = (origin - center) · direction
+ *   c = (origin - center)² - radius²
+ *
+ * @param origin  Ray starting point (world space)
+ * @param dir     Normalized ray direction
+ * @param sphere  Sphere (center + radius) to test
+ * @param t       Output: Distance to nearest intersection if found
+ * @return true if ray hits sphere (with t > 0), false otherwise
+ */
 bool intersectRaySphere(const Vec3 &origin, const Vec3 &dir, const Sphere &sphere, float &t)
 {
     Vec3 oc = origin - sphere.center;                     // Vector from ray origin to sphere center
@@ -61,11 +121,41 @@ bool intersectRaySphere(const Vec3 &origin, const Vec3 &dir, const Sphere &spher
     return false;
 }
 
+/**
+ * Computes wavelength-dependent refractive index for water/air interface.
+ *
+ * Uses an empirical approximation of the Sellmeier dispersion formula:
+ * n(λ) = 1.31477 + 0.0108148/log₁₀(0.00690246λ)
+ *
+ * @param wavelength Light wavelength in nanometers [380,780]
+ * @return Refractive index (n) with:
+ *         - n ≈ 1.33 for visible spectrum
+ *         - Higher dispersion at shorter wavelengths (blue/violet)
+ */
 float wavelengthToRefraction(float wavelength)
 {
     return 1.31477 + 0.0108148 / (std::log10(0.00690246 * wavelength));
 }
 
+/**
+ * Converts a visible light wavelength to sRGB color with gamma correction.
+ *
+ * Implements a piecewise linear approximation of the visible spectrum:
+ * 380-440nm: Violet to Blue
+ * 440-490nm: Blue to Cyan
+ * 490-510nm: Cyan to Green
+ * 510-580nm: Green to Yellow
+ * 580-645nm: Yellow to Red
+ * 645-780nm: Red
+ *
+ * @param wavelength Input wavelength in nanometers [380,780]
+ * @return RGBA color with:
+ *         - Gamma correction (γ=0.8)
+ *         - Intensity falloff at spectrum edges
+ *         - Alpha always 255 (opaque)
+ *
+ * Note: Returns black for wavelengths outside visible range.
+ */
 Color wavelengthToRGB(float wavelength)
 {
     float gamma = 0.8;
@@ -131,6 +221,25 @@ Color wavelengthToRGB(float wavelength)
         255};
 }
 
+/**
+ * Traces a light ray through a sphere, simulating wavelength-dependent refraction and reflection.
+ *
+ * Implements:
+ * - Snell's Law for refraction
+ * - Fresnel equations for reflectance
+ * - Chromatic dispersion via wavelength-to-refraction mapping
+ * - Up to maxBounces interactions
+ *
+ * @param origin      Ray starting position (world space)
+ * @param dir         Normalized ray direction
+ * @param sphere      Sphere to intersect with (center + radius)
+ * @param maxBounces  Maximum ray interactions (refractions+reflections)
+ * @param wavelength  Light wavelength in nm (380-780) for dispersion effects
+ *
+ * @return Accumulated color from all ray interactions
+ *
+ * Note: Uses Russian roulette termination for reflectance/transmittance
+ */
 Color traceRay(const Vec3 &origin, const Vec3 &dir, const Sphere &sphere, int maxBounces, float wavelength)
 {
     Color color = {0, 0, 0, 255};
@@ -210,6 +319,7 @@ int main()
             // Trace the ray through the sphere, with up to 4 bounces
             Color color = traceRay(light.pos, lightDir, sphere, MAX_BOUNCES, light.wavelength);
 
+            // Combine the refracted color with the pixel color based on interaction
             color.r = std::min(255, color.r + pixelColor.r);
             color.g = std::min(255, color.g + pixelColor.g);
             color.b = std::min(255, color.b + pixelColor.b);
