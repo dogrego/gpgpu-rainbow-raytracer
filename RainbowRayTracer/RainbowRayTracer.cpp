@@ -4,6 +4,7 @@
 #include <cmath>
 #include <iostream>
 #include <vector>
+#include <chrono>
 
 #define WIDTH 500     // width of the generated image
 #define HEIGHT 500    // height of the generated image
@@ -299,17 +300,20 @@ Color traceRay(const Vec3 &origin, const Vec3 &dir, const Sphere &sphere, int ma
 
 int main()
 {
+    std::cout << "Starting CPU ray tracing..." << std::endl;
+    auto start_time = std::chrono::high_resolution_clock::now();
+
     std::vector<unsigned char> pixels(WIDTH * HEIGHT * CHANNEL_NUM);
     float wavelengthStart = 380.0f;
     float wavelengthEnd = 780.0f;
-    Sphere sphere = {{WIDTH / 2.0f, HEIGHT / 2.0f, 50.0f}, 40.0f};
-    Light light = {{WIDTH / 2.0f, HEIGHT, 100.0f}, {0, -1, -0.5}};
+    Sphere sphere = { {WIDTH / 2.0f, HEIGHT / 2.0f, 50.0f}, 40.0f };
+    Light light = { {WIDTH / 2.0f, HEIGHT, 100.0f}, {0, -1, -0.5} };
 
     for (int y = 0; y < HEIGHT; ++y)
     {
         for (int x = 0; x < WIDTH; ++x)
         {
-            Vec3 pixelPos = {static_cast<float>(x), static_cast<float>(y), 0};
+            Vec3 pixelPos = { static_cast<float>(x), static_cast<float>(y), 0 };
             Vec3 lightDir = (sphere.center - light.pos).normalize();
 
             // Convert the wavelength based on the pixel row (simulate color dispersion)
@@ -332,6 +336,16 @@ int main()
         }
     }
 
+    auto end_time = std::chrono::high_resolution_clock::now();
+    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time).count();
+
     stbi_write_png("rainbow.png", WIDTH, HEIGHT, CHANNEL_NUM, pixels.data(), WIDTH * CHANNEL_NUM);
+
+    std::cout << "CPU ray tracing completed." << std::endl;
+    std::cout << "Image dimensions: " << WIDTH << "x" << HEIGHT << std::endl;
+    std::cout << "Max bounces: " << MAX_BOUNCES << std::endl;
+    std::cout << "Execution time: " << duration << " ms" << std::endl;
+    std::cout << "Output saved to rainbow.png" << std::endl;
+
     return 0;
 }
