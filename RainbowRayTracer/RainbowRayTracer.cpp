@@ -6,8 +6,8 @@
 #include <vector>
 #include <chrono>
 
-#define WIDTH 500     // width of the generated image
-#define HEIGHT 500    // height of the generated image
+#define WIDTH 1024     // width of the generated image
+#define HEIGHT 1024    // height of the generated image
 #define CHANNEL_NUM 4 // the number of color channels per pixel
 #define MAX_BOUNCES 4 // the maximum number of times a light ray can bounce or interact with the sphere during the ray tracing process
 
@@ -305,7 +305,7 @@ int main()
 
     std::vector<unsigned char> pixels(WIDTH * HEIGHT * CHANNEL_NUM);
     float wavelengthStart = 380.0f;
-    float wavelengthEnd = 780.0f;
+    float wavelengthEnd = 750.0f;
     Sphere sphere = { {WIDTH / 2.0f, HEIGHT / 2.0f, 50.0f}, 40.0f };
     Light light = { {WIDTH / 2.0f, HEIGHT, 100.0f}, {0, -1, -0.5} };
 
@@ -346,6 +346,8 @@ int main()
     std::cout << "Max bounces: " << MAX_BOUNCES << std::endl;
     std::cout << "Execution time: " << duration << " ms" << std::endl;
     std::cout << "Output saved to rainbow.png" << std::endl;
-
+    // Keep terminal open
+    std::cout << "Program completed. Press Enter to exit...";
+    std::cin.ignore();
     return 0;
 }
