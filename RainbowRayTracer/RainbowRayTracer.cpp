@@ -313,7 +313,7 @@ int main()
             Vec3 lightDir = (sphere.center - light.pos).normalize();
 
             // Convert the wavelength based on the pixel row (simulate color dispersion)
-            light.wavelength = wavelengthStart + (wavelengthEnd - wavelengthStart) * (y / float(HEIGHT));
+            light.wavelength = wavelengthEnd - (wavelengthEnd - wavelengthStart) * (y / float(HEIGHT));
             Color pixelColor = wavelengthToRGB(light.wavelength);
 
             // Trace the ray through the sphere, with up to 4 bounces
