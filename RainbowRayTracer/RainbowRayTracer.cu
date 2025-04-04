@@ -94,6 +94,38 @@ __device__ float fresnel(const Vec3 &incident, const Vec3 &normal, float n1, flo
 }
 
 /**
+ * @brief Tests ray-sphere intersection using geometric solution.
+ *
+ * Solves quadratic equation: t² + 2b·t + c = 0
+ * where:
+ *   b = (origin - center) · direction
+ *   c = (origin - center)² - radius²
+ *
+ * @param origin  Ray starting point (world space)
+ * @param dir     Normalized ray direction
+ * @param sphere  Sphere (center + radius) to test
+ * @param t       Output: Distance to nearest intersection if found
+ * @return true if ray hits sphere (with t > 0), false otherwise
+ */
+__device__ bool intersectRaySphere(const Vec3 &origin, const Vec3 &dir, const Sphere &sphere, float &t)
+{
+    Vec3 oc = origin - sphere.center;                     // Vector from ray origin to sphere center
+    float b = 2.0f * oc.dot(dir);                         // Dot product term for the quadratic equation
+    float c = oc.dot(oc) - sphere.radius * sphere.radius; // Constant term for the quadratic equation
+    float discriminant = b * b - 4.0f * c;                // Discriminant of the quadratic equation
+
+    // If the discriminant is positive, there are real intersections
+    if (discriminant > 0)
+    {
+        t = (-b - sqrtf(discriminant)) / 2.0f; // Calculate the intersection distance
+        return t > 0;                          // If t is positive, the intersection occurs in the direction of the ray
+    }
+
+    // No intersection
+    return false;
+}
+
+/**
  * @brief CUDA kernel to render a scene pixel by pixel.
  *
  * This kernel performs ray tracing to compute the color of each pixel in an image.
