@@ -126,6 +126,106 @@ __device__ bool intersectRaySphere(const Vec3 &origin, const Vec3 &dir, const Sp
 }
 
 /**
+ * @brief Computes wavelength-dependent refractive index for water/air interface.
+ *
+ * Uses an empirical approximation of the Sellmeier dispersion formula:
+ * n(λ) = 1.31477 + 0.0108148/log₁₀(0.00690246λ)
+ *
+ * @param wavelength Light wavelength in nanometers [380,780]
+ * @return Refractive index (n) with:
+ *         - n ≈ 1.33 for visible spectrum
+ *         - Higher dispersion at shorter wavelengths (blue/violet)
+ */
+__device__ float wavelengthToRefraction(float wavelength)
+{
+    return 1.31477f + 0.0108148f / log10f(0.00690246f * wavelength);
+}
+
+/**
+ * @brief Converts a visible light wavelength to sRGB color with gamma correction.
+ *
+ * Implements a piecewise linear approximation of the visible spectrum:
+ * 380-440nm: Violet to Blue
+ * 440-490nm: Blue to Cyan
+ * 490-510nm: Cyan to Green
+ * 510-580nm: Green to Yellow
+ * 580-645nm: Yellow to Red
+ * 645-780nm: Red
+ *
+ * @param wavelength Input wavelength in nanometers [380,780]
+ * @return RGBA color with:
+ *         - Gamma correction (γ=0.8)
+ *         - Intensity falloff at spectrum edges
+ *         - Alpha always 255 (opaque)
+ *
+ * Note: Returns black for wavelengths outside visible range.
+ */
+__device__ Color wavelengthToRGB(float wavelength)
+{
+    float gamma = 0.8;
+    float intensityMax = 255;
+    float factor;
+    float r = 0.0, g = 0.0, b = 0.0;
+
+    // Color Mapping
+    if (wavelength >= 380 && wavelength < 440)
+    {
+        // violet to blue
+        r = -(wavelength - 440) / (440 - 380);
+        b = 1.0;
+    }
+    else if (wavelength >= 440 && wavelength < 490)
+    {
+        // blue to cyan
+        g = (wavelength - 440) / (490 - 440);
+        b = 1.0;
+    }
+    else if (wavelength >= 490 && wavelength < 510)
+    {
+        // cyan to green
+        g = 1.0;
+        b = -(wavelength - 510) / (510 - 490);
+    }
+    else if (wavelength >= 510 && wavelength < 580)
+    {
+        // green to yellow
+        r = (wavelength - 510) / (580 - 510);
+        g = 1.0;
+    }
+    else if (wavelength >= 580 && wavelength < 645)
+    {
+        // yellow to orange
+        r = 1.0;
+        g = -(wavelength - 645) / (645 - 580);
+    }
+    else if (wavelength >= 645 && wavelength < 781)
+    {
+        // orange to red
+        r = 1.0;
+    }
+
+    // Intensity Factor
+    if (wavelength >= 380 && wavelength < 420)
+        // violet
+        factor = 0.3 + 0.7 * (wavelength - 380) / (420 - 380);
+    else if (wavelength >= 420 && wavelength < 701)
+        // blue to red
+        factor = 1.0;
+    else if (wavelength >= 701 && wavelength < 781)
+        // red
+        factor = 0.3 + 0.7 * (780 - wavelength) / (780 - 700);
+    else
+        // no color - wavelength is outside the visible spectrum
+        factor = 0.0;
+
+    return {
+        static_cast<unsigned char>(intensityMax * pow(r * factor, gamma)),
+        static_cast<unsigned char>(intensityMax * pow(g * factor, gamma)),
+        static_cast<unsigned char>(intensityMax * pow(b * factor, gamma)),
+        255};
+}
+
+/**
  * @brief CUDA kernel to render a scene pixel by pixel.
  *
  * This kernel performs ray tracing to compute the color of each pixel in an image.
