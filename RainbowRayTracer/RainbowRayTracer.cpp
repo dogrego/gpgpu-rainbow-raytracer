@@ -280,10 +280,10 @@ Color traceRay(const Vec3 &origin, const Vec3 &dir, const Sphere &sphere, int ma
             currentPos = intersectionPoint;
 
             // Decide reflection or refraction
-            if (refracted.dot(refracted) > 0 && (rand() / float(RAND_MAX)) >= reflectance)
+            if (refracted.dot(refracted) > 0)
             {
-                currentDir = refracted;
-                isInside = !isInside; // Toggle inside/outside state
+                currentDir = (rand() / float(RAND_MAX)) < reflectance ? reflected : refracted;
+                isInside = !isInside;
             }
             else
             {
