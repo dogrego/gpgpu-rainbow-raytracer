@@ -226,6 +226,82 @@ __device__ Color wavelengthToRGB(float wavelength)
 }
 
 /**
+ * @brief Traces a light ray through a sphere, simulating wavelength-dependent refraction and reflection.
+ *
+ * Implements:
+ * - Snell's Law for refraction
+ * - Fresnel equations for reflectance
+ * - Chromatic dispersion via wavelength-to-refraction mapping
+ * - Up to maxBounces interactions
+ *
+ * @param origin      Ray starting position (world space)
+ * @param dir         Normalized ray direction
+ * @param sphere      Sphere to intersect with (center + radius)
+ * @param maxBounces  Maximum ray interactions (refractions+reflections)
+ * @param wavelength  Light wavelength in nm (380-780) for dispersion effects
+ *
+ * @return Accumulated color from all ray interactions
+ *
+ * Note: Uses Russian roulette termination for reflectance/transmittance
+ */
+__device__ Color traceRay(const Vec3 &origin, const Vec3 &dir, const Sphere &sphere, int maxBounces, float wavelength, curandState *localRandState)
+{
+    Color color = {0, 0, 0, 255};
+    Vec3 currentDir = dir, currentPos = origin;
+    float refractiveIndex = wavelengthToRefraction(wavelength);
+    bool isInside = false; // Start outside the sphere
+
+    for (int bounce = 0; bounce < maxBounces; ++bounce)
+    {
+        float t;
+        if (intersectRaySphere(currentPos, currentDir, sphere, t))
+        {
+            Vec3 hit = currentPos + currentDir * t;
+            Vec3 normal = (hit - sphere.center).normalize();
+
+            // Flip normal if ray is inside the sphere
+            if (isInside)
+                normal = -normal;
+
+            // Compute Fresnel reflectance
+            float n1 = isInside ? refractiveIndex : 1.0f;
+            float n2 = isInside ? 1.0f : refractiveIndex;
+            float reflectance = fresnel(currentDir, normal, n1, n2);
+
+            // Compute reflection/refraction directions
+            Vec3 reflected = reflect(currentDir, normal);
+            Vec3 refracted = refract(currentDir, normal, n1, n2);
+
+            // Blend color
+            Color waveColor = wavelengthToRGB(wavelength);
+
+            color.r = fminf(255.0f, color.r * (1 - reflectance) + waveColor.r * reflectance);
+            color.g = fminf(255.0f, color.g * (1 - reflectance) + waveColor.g * reflectance);
+            color.b = fminf(255.0f, color.b * (1 - reflectance) + waveColor.b * reflectance);
+
+            // Update ray position/direction
+            currentPos = hit;
+
+            // Decide reflection or refraction
+            if (refracted.dot(refracted) > 0)
+            {
+                float randVal = curand_uniform(localRandState); // Get a random float in [0, 1)
+                currentDir = (randVal < reflectance) ? reflected : refracted;
+                isInside = !isInside;
+            }
+            else
+            {
+                currentDir = reflected;
+            }
+        }
+        else
+            break; // Ray escaped
+    }
+
+    return color;
+}
+
+/**
  * @brief CUDA kernel to render a scene pixel by pixel.
  *
  * This kernel performs ray tracing to compute the color of each pixel in an image.
