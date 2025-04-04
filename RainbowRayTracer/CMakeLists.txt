@@ -12,7 +12,7 @@ project ("RainbowRayTracer" LANGUAGES CXX CUDA)
 find_package(CUDA REQUIRED)
 
 # Add source to this project's executable.
-add_executable (RainbowRayTracer "RainbowRayTracer.h" "RainbowRayTracer.cu")
+add_executable (RainbowRayTracer "RainbowRayTracer.cu" "RainbowRayTracer.cuh")
 
 # Set C++ and CUDA standard
 if (CMAKE_VERSION VERSION_GREATER 3.12)
