@@ -8,14 +8,16 @@
 #include <vector>
 #include <cuda_runtime.h>
 #include <curand_kernel.h>
+#include <device_launch_parameters.h>
 
-#define WIDTH 1024    // width of the generated image
-#define HEIGHT 1024   // height of the generated image
-#define CHANNEL_NUM 4 // the number of color channels per pixel
-#define MAX_BOUNCES 4 // the maximum number of times a light ray can bounce or interact with the sphere during the ray tracing process
+#define WIDTH 1024
+#define HEIGHT 1024
+#define CHANNEL_NUM 4
+#define MAX_BOUNCES 4
+#define SAMPLES 5
 
 /**
- * @brief Computes perfect reflection direction (R = I - 2·N(N·I))
+ * Computes perfect reflection direction (R = I - 2·N(N·I))
  *
  * Implements the standard reflection equation for ideal mirrors:
  * R = I - 2·N(N·I) where:
@@ -32,11 +34,11 @@
  */
 __device__ Vec3 reflect(const Vec3 &I, const Vec3 &N)
 {
-    return I - N * 2.0f * I.dot(N);
+    return I - N * 2.0f * N.dot(I);
 }
 
 /**
- * @brief Computes refraction direction using Snell's law.
+ * Computes refraction direction using Snell's law.
  *
  * Implements:
  * n₁·sinθ₁ = n₂·sinθ₂
@@ -63,7 +65,7 @@ __device__ Vec3 refract(const Vec3 &incident, const Vec3 &normal, float n1, floa
 }
 
 /**
- * @brief Fresnel equations for reflection and refraction blending
+ * Fresnel equations for reflection and refraction blending
  *
  * Implements the Fresnel equations for unpolarized light:
  * R = ½(R_∥ + R_⊥) where:
@@ -94,7 +96,7 @@ __device__ float fresnel(const Vec3 &incident, const Vec3 &normal, float n1, flo
 }
 
 /**
- * @brief Tests ray-sphere intersection using geometric solution.
+ * Tests ray-sphere intersection using geometric solution.
  *
  * Solves quadratic equation: t² + 2b·t + c = 0
  * where:
@@ -126,23 +128,80 @@ __device__ bool intersectRaySphere(const Vec3 &origin, const Vec3 &dir, const Sp
 }
 
 /**
- * @brief Computes wavelength-dependent refractive index for water/air interface.
- *
- * Uses an empirical approximation of the Sellmeier dispersion formula:
- * n(λ) = 1.31477 + 0.0108148/log₁₀(0.00690246λ)
- *
- * @param wavelength Light wavelength in nanometers [380,780]
- * @return Refractive index (n) with:
- *         - n ≈ 1.33 for visible spectrum
- *         - Higher dispersion at shorter wavelengths (blue/violet)
+ * Tests intersection between a ray and an infinite plane.
+ * @param origin  Ray origin point in world space
+ * @param dir     Ray direction vector (does not need normalization)
+ * @param plane   Plane defined by normal and distance (normal·X = distance)
+ * @param t       Output: Distance to intersection point if valid
+ * @return true if ray intersects plane in forward direction, false otherwise
  */
-__device__ float wavelengthToRefraction(float wavelength)
+__device__ bool intersectRayPlane(const Vec3 &origin, const Vec3 &dir, const Plane &plane, float &t)
 {
-    return 1.31477f + 0.0108148f / log10f(0.00690246f * wavelength);
+    // Compute denominator: dot product of plane normal and ray direction
+    // Represents cosine of angle between them (0 = parallel)
+    float denom = plane.normal.dot(dir);
+
+    // Check if ray and plane are not parallel (denominator > epsilon)
+    if (fabsf(denom) > 1e-6)
+    {
+        // Calculate intersection distance t:
+        // t = (plane distance - dot(normal, origin)) / denominator
+        // This solves: origin + t*dir lies on plane normal·X = distance
+        t = (plane.distance - plane.normal.dot(origin)) / denom;
+
+        // Only return true for intersections in ray's forward direction
+        return t >= 0;
+    }
+
+    // Ray is parallel to plane (no intersection possible)
+    return false;
 }
 
 /**
- * @brief Converts a visible light wavelength to sRGB color with gamma correction.
+ * Computes refractive index of water for a given wavelength using Sellmeier's equation.
+ * Models the dispersion relationship of water at 20°C.
+ *
+ * Uses Sellmeier coefficients for pure water at 20°C
+ * Implements the standard Sellmeier dispersion formula:
+ *       n²(λ) = 1 + Σ(Bᵢλ²)/(λ²-Cᵢ) where λ is wavelength in microns
+ * Wavelength conversion: 1nm = 0.001μm
+ *
+ * @param wavelength Light wavelength in nanometers (380-750nm for visible spectrum)
+ * @return Refractive index of water at specified wavelength (unitless)
+ */
+__device__ float wavelengthToRefraction(float wavelength)
+{
+    // Convert input wavelength from nanometers to microns
+    // (Sellmeier equation expects microns)
+    float lambda_microns = wavelength / 1000.0f;
+
+    // Precompute squared wavelength for Sellmeier terms
+    float lambda_sq = lambda_microns * lambda_microns;
+
+    // Sellmeier coefficients for water at 20°C (from empirical data)
+    // B coefficients represent oscillator strengths
+    const float B1 = 5.684027565e-1f; // First oscillator term
+    const float B2 = 1.726177391e-1f; // Second oscillator term
+    const float B3 = 2.086189578e-2f; // Third oscillator term
+
+    // C coefficients represent resonance wavelengths squared
+    const float C1 = 5.101829712e-3f; // First resonance term (μm²)
+    const float C2 = 1.821153936e-2f; // Second resonance term (μm²)
+    const float C3 = 2.620722293e-2f; // Third resonance term (μm²)
+
+    // Compute Sellmeier dispersion equation:
+    // n² = 1 + B₁λ²/(λ²-C₁) + B₂λ²/(λ²-C₂) + B₃λ²/(λ²-C₃)
+    float n_squared = 1.0f +
+                      (B1 * lambda_sq) / (lambda_sq - C1) + // UV contribution
+                      (B2 * lambda_sq) / (lambda_sq - C2) + // Visible contribution
+                      (B3 * lambda_sq) / (lambda_sq - C3);  // IR contribution
+
+    // Return refractive index (sqrt of n²)
+    return sqrtf(n_squared);
+}
+
+/**
+ * Converts a visible light wavelength to sRGB color with gamma correction.
  *
  * Implements a piecewise linear approximation of the visible spectrum:
  * 380-440nm: Violet to Blue
@@ -219,181 +278,284 @@ __device__ Color wavelengthToRGB(float wavelength)
         factor = 0.0;
 
     return {
-        static_cast<unsigned char>(intensityMax * pow(r * factor, gamma)),
-        static_cast<unsigned char>(intensityMax * pow(g * factor, gamma)),
-        static_cast<unsigned char>(intensityMax * pow(b * factor, gamma)),
+        static_cast<unsigned char>(intensityMax * powf(r * factor, gamma)),
+        static_cast<unsigned char>(intensityMax * powf(g * factor, gamma)),
+        static_cast<unsigned char>(intensityMax * powf(b * factor, gamma)),
         255};
 }
 
 /**
- * @brief Traces a light ray through a sphere, simulating wavelength-dependent refraction and reflection.
+ * Calculates light absorption coefficient based on wavelength.
  *
- * Implements:
- * - Snell's Law for refraction
- * - Fresnel equations for reflectance
- * - Chromatic dispersion via wavelength-to-refraction mapping
- * - Up to maxBounces interactions
- *
- * @param origin      Ray starting position (world space)
- * @param dir         Normalized ray direction
- * @param sphere      Sphere to intersect with (center + radius)
- * @param maxBounces  Maximum ray interactions (refractions+reflections)
- * @param wavelength  Light wavelength in nm (380-780) for dispersion effects
- *
- * @return Accumulated color from all ray interactions
- *
- * Note: Uses Russian roulette termination for reflectance/transmittance
+ * @param wavelength  Light wavelength in nanometers (nm)
+ * @return Absorption coefficient (unitless, higher = more absorption)
  */
-__device__ Color traceRay(const Vec3 &origin, const Vec3 &dir, const Sphere &sphere, int maxBounces, float wavelength, curandState *localRandState)
+__device__ float getAbsorptionCoefficient(float wavelength)
 {
-    Color color = {0, 0, 0, 255};
-    Vec3 currentDir = dir, currentPos = origin;
-    float refractiveIndex = wavelengthToRefraction(wavelength);
-    bool isInside = false; // Start outside the sphere
+    // Violet/UV range (wavelength < 400nm) - minimal absorption
+    if (wavelength < 400.0f)
+        return 0.01f;
 
+    // Blue to cyan range (400-500nm) - linear increase from 0.01 to 0.04
+    else if (wavelength < 500.0f)
+        return 0.01f + 0.03f * (wavelength - 400.0f) / 100.0f;
+
+    // Green to yellow range (500-600nm) - linear increase from 0.04 to 0.10
+    else if (wavelength < 600.0f)
+        return 0.04f + 0.06f * (wavelength - 500.0f) / 100.0f;
+
+    // Orange to red range (600-700nm) - linear increase from 0.10 to 1.00
+    else if (wavelength < 700.0f)
+        return 0.1f + 0.9f * (wavelength - 600.0f) / 100.0f;
+
+    // Near-infrared range (>700nm) - steep linear increase from 1.00
+    else
+        return 1.0f + 9.0f * (wavelength - 700.0f) / 80.0f;
+}
+
+/**
+ * Traces a light ray through the scene, simulating optical effects.
+ * @param origin       Starting position of the ray
+ * @param dir          Initial direction of the ray (normalized)
+ * @param sphere       Sphere object in the scene
+ * @param plane        Plane object in the scene
+ * @param maxBounces   Maximum number of ray bounces allowed
+ * @param wavelength   Light wavelength in nanometers (400-700nm visible range)
+ * @return             Computed color after ray tracing
+ */
+__device__ Color traceRay(const Vec3 &origin, const Vec3 &dir, const Sphere &sphere, const Plane &plane,
+                          int maxBounces, float wavelength, curandState *state)
+{
+    // Initialize as transparent black
+    Color color = {0, 0, 0, 0};
+    Vec3 currentDir = dir;
+    Vec3 currentPos = origin;
+
+    // Get refractive index based on wavelength (dispersion effect)
+    float refractiveIndex = wavelengthToRefraction(wavelength);
+
+    // Track whether we're inside the sphere (for refraction/absorption)
+    bool isInside = false;
+
+    // Track light intensity (decreases with absorption and bounces)
+    float accumulatedIntensity = 1.0f;
+
+    // Main ray bounce loop
     for (int bounce = 0; bounce < maxBounces; ++bounce)
     {
-        float t;
-        if (intersectRaySphere(currentPos, currentDir, sphere, t))
-        {
-            Vec3 hit = currentPos + currentDir * t;
-            Vec3 normal = (hit - sphere.center).normalize();
+        // Check for sphere intersection
+        float t_sphere;
+        bool hit_sphere = intersectRaySphere(currentPos, currentDir, sphere, t_sphere);
 
-            // Flip normal if ray is inside the sphere
+        // Check for plane intersection
+        float t_plane;
+        bool hit_plane = intersectRayPlane(currentPos, currentDir, plane, t_plane);
+
+        // Determine which object was hit first (if any)
+        bool sphere_first = hit_sphere && (!hit_plane || t_sphere < t_plane);
+
+        if (sphere_first)
+        {
+            // SPHERE INTERACTION ==============================================
+            Vec3 intersectionPoint = currentPos + currentDir * t_sphere;
+
+            // Compute surface normal (flipped if inside sphere)
+            Vec3 normal = (intersectionPoint - sphere.center).normalize();
             if (isInside)
+            {
                 normal = -normal;
 
-            // Compute Fresnel reflectance
-            float n1 = isInside ? refractiveIndex : 1.0f;
-            float n2 = isInside ? 1.0f : refractiveIndex;
+                // Apply Beer-Lambert absorption inside the sphere
+                float absorption = getAbsorptionCoefficient(wavelength);
+                accumulatedIntensity *= expf(-absorption * t_sphere);
+            }
+
+            // Compute Fresnel reflectance at boundary
+            float n1 = isInside ? refractiveIndex : 1.0f; // Current medium
+            float n2 = isInside ? 1.0f : refractiveIndex; // New medium
             float reflectance = fresnel(currentDir, normal, n1, n2);
 
-            // Compute reflection/refraction directions
+            // Compute reflection and refraction directions
             Vec3 reflected = reflect(currentDir, normal);
             Vec3 refracted = refract(currentDir, normal, n1, n2);
 
-            // Blend color
-            Color waveColor = wavelengthToRGB(wavelength);
+            // Russian roulette termination - randomly stop based on intensity
+            float continueProb = fmaxf(reflectance, 1.0f - reflectance);
+            if (curand_uniform(state) > continueProb)
+                break;
 
-            color.r = fminf(255.0f, color.r * (1 - reflectance) + waveColor.r * reflectance);
-            color.g = fminf(255.0f, color.g * (1 - reflectance) + waveColor.g * reflectance);
-            color.b = fminf(255.0f, color.b * (1 - reflectance) + waveColor.b * reflectance);
-
-            // Update ray position/direction
-            currentPos = hit;
-
-            // Decide reflection or refraction
+            // Choose between reflection and refraction
             if (refracted.dot(refracted) > 0)
-            {
-                float randVal = curand_uniform(localRandState); // Get a random float in [0, 1)
-                currentDir = (randVal < reflectance) ? reflected : refracted;
-                isInside = !isInside;
+            { // Valid refraction
+                if (curand_uniform(state) < reflectance / continueProb)
+                {
+                    currentDir = reflected; // Reflect
+                }
+                else
+                {
+                    currentDir = refracted; // Refract
+                    isInside = !isInside;   // Toggle inside/outside state
+                }
             }
             else
             {
-                currentDir = reflected;
+                currentDir = reflected; // Total internal reflection
             }
+
+            // Move slightly off surface to avoid self-intersection
+            currentPos = intersectionPoint + currentDir * 1e-4f;
+        }
+        else if (hit_plane)
+        {
+            // PLANE INTERACTION (RAINBOW CAPTURE) ============================
+            Vec3 intersectionPoint = currentPos + currentDir * t_plane;
+
+            // Convert wavelength to RGB color
+            Color wavelengthColor = wavelengthToRGB(wavelength);
+
+            // Apply accumulated intensity and set opaque
+            color.r = (unsigned char)(wavelengthColor.r * accumulatedIntensity);
+            color.g = (unsigned char)(wavelengthColor.g * accumulatedIntensity);
+            color.b = (unsigned char)(wavelengthColor.b * accumulatedIntensity);
+            color.a = 255;
+            break; // Stop tracing after capturing the rainbow
         }
         else
-            break; // Ray escaped
+        {
+            // MISSED ALL OBJECTS =============================================
+            break;
+        }
+
+        // Stop if intensity becomes negligible
+        if (accumulatedIntensity < 0.01f)
+            break;
     }
 
     return color;
 }
 
-/**
- * @brief CUDA kernel to render a scene pixel by pixel.
- *
- * This kernel performs ray tracing to compute the color of each pixel in an image.
- * It simulates light propagation and interaction with a sphere in the scene. The kernel
- * computes the wavelength of light for each pixel and traces rays from a light source,
- * interacting with the sphere. The color is determined based on reflection, refraction,
- * and the Fresnel effect.
- *
- * @param pixels Pointer to the output pixel buffer. Each pixel is represented by 4 channels (RGBA).
- * @param sphere Pointer to a Sphere object in the scene. This sphere is the object being rendered.
- * @param light Pointer to a Light object in the scene. This light source is used to compute the light direction.
- * @param wavelengthStart The starting wavelength (in nm) for the rainbow effect.
- * @param wavelengthEnd The ending wavelength (in nm) for the rainbow effect.
- */
-__global__ void renderKernel(unsigned char *pixels, Sphere *sphere, Light *light, float wavelengthStart, float wavelengthEnd)
+__global__ void renderKernel(unsigned char *pixels, const Sphere sphere, const Plane plane,
+                             const Vec3 lightPos, float lightWidth, unsigned int frame_seed)
 {
-    // Initialize the random number generator state for this thread
-    curandState state;
-
-    // Loop over every pixel in the image (height and width of the render)
-    for (int y = 0; y < HEIGHT; ++y)
+    // Sequential execution - only thread 0 does all the work
+    if (threadIdx.x == 0 && blockIdx.x == 0)
     {
-        for (int x = 0; x < WIDTH; ++x)
+        // Visible light spectrum range (380nm-750nm)
+        float wavelengthStart = 380.0f;
+        float wavelengthEnd = 750.0f;
+
+        curandState state;
+        curand_init(frame_seed * WIDTH, 0, 0, &state);
+
+        // ========== MAIN RENDERING LOOP ==========
+        for (int y = 0; y < HEIGHT; ++y)
         {
-            // Calculate the index in the pixel buffer for the current pixel
-            int index = (y * WIDTH + x) * CHANNEL_NUM;
+            for (int x = 0; x < WIDTH; ++x)
+            {
+                Color finalColor = {0, 0, 0, 0}; // Initialize pixel color
+                unsigned int seed = frame_seed + y * WIDTH + x;
 
-            // Compute the wavelength for the current pixel based on its y-coordinate (for a rainbow effect)
-            float wavelength = wavelengthEnd - (wavelengthEnd - wavelengthStart) * (y / float(HEIGHT));
+                // Anti-aliasing: Stratified sampling over light source
+                for (int s = 0; s < SAMPLES; ++s)
+                {
+                    // Jittered sampling within light area
+                    float jitterX = curand_uniform(&state) - 0.5f;
+                    float jitterY = curand_uniform(&state) - 0.5f;
 
-            // Calculate the direction of light from the light source to the sphere
-            Vec3 lightDir = (sphere->center - light->pos).normalize();
+                    Vec3 samplePos = {
+                        lightPos.x + jitterX * lightWidth,
+                        lightPos.y + jitterY * lightWidth,
+                        lightPos.z};
 
-            // Get the color of the pixel corresponding to the current wavelength
-            Color baseColor = wavelengthToRGB(wavelength);
+                    // Calculate ray from light to current pixel
+                    Vec3 pixelPos = {float(x), float(y), 0.0f};
+                    Vec3 dir = (pixelPos - samplePos).normalize();
 
-            // Trace the ray from the light source and compute the resulting color at the hit point
-            Color color = traceRay(light->pos, lightDir, *sphere, MAX_BOUNCES, light->wavelength, &state);
+                    // Wavelength varies with vertical position (rainbow effect)
+                    float wavelength = wavelengthEnd - (wavelengthEnd - wavelengthStart) * (y / float(HEIGHT));
 
-            // Blend the calculated color with the base color (for a rainbow effect)
-            color.r = fminf(255, color.r + baseColor.r);
-            color.g = fminf(255, color.g + baseColor.g);
-            color.b = fminf(255, color.b + baseColor.b);
+                    // Trace ray through scene
+                    Color sampleColor = traceRay(samplePos, dir, sphere, plane, MAX_BOUNCES, wavelength, &state);
 
-            // Store the final color in the output pixel buffer (RGBA)
-            pixels[index + 0] = color.r; // Red channel
-            pixels[index + 1] = color.g; // Green channel
-            pixels[index + 2] = color.b; // Blue channel
-            pixels[index + 3] = 255;     // Alpha channel (full opacity)
+                    // Accumulate color samples (averaged later)
+                    finalColor.r += sampleColor.r / SAMPLES;
+                    finalColor.g += sampleColor.g / SAMPLES;
+                    finalColor.b += sampleColor.b / SAMPLES;
+                }
+                finalColor.a = 255; // Set fully opaque
+
+                // Store final pixel in buffer (RGBA order)
+                int index = (y * WIDTH + x) * CHANNEL_NUM;
+                pixels[index + 0] = finalColor.r;
+                pixels[index + 1] = finalColor.g;
+                pixels[index + 2] = finalColor.b;
+                pixels[index + 3] = finalColor.a;
+            }
         }
     }
 }
 
 int main()
 {
-    std::cout << "Starting CUDA SEQUENTIAL ray tracing..." << std::endl;
-    auto start = std::chrono::high_resolution_clock::now();
+    std::cout << "Starting CUDA sequential ray tracing..." << std::endl;
+    auto start_time = std::chrono::high_resolution_clock::now();
 
-    unsigned char *d_pixels, *pixels = new unsigned char[WIDTH * HEIGHT * CHANNEL_NUM];
-    cudaMalloc(&d_pixels, WIDTH * HEIGHT * CHANNEL_NUM);
+    // Allocate unified memory for pixels (accessible by both CPU and GPU)
+    unsigned char *d_pixels;
+    cudaMallocManaged(&d_pixels, WIDTH * HEIGHT * CHANNEL_NUM);
 
-    Sphere h_sphere = {{WIDTH / 2.0f, HEIGHT / 2.0f, 50.0f}, 40.0f};
-    Light h_light = {{WIDTH / 2.0f, HEIGHT, 100.0f}, {0, -1, -0.5f}};
+    // ========== SCENE SETUP ==========
+    // Water droplet sphere (centered in scene)
+    Sphere sphere = {
+        {WIDTH / 2.0f, HEIGHT / 2.0f, 500.0f}, // Center position
+        300.0f                                 // Radius
+    };
 
-    Sphere *d_sphere;
-    Light *d_light;
-    cudaMalloc(&d_sphere, sizeof(Sphere));
-    cudaMalloc(&d_light, sizeof(Light));
-    cudaMemcpy(d_sphere, &h_sphere, sizeof(Sphere), cudaMemcpyHostToDevice);
-    cudaMemcpy(d_light, &h_light, sizeof(Light), cudaMemcpyHostToDevice);
+    // Observation plane (catches rainbow rays)
+    Plane plane = {
+        {0.0f, 0.0f, -1.0f}, // Normal facing camera (negative Z)
+        1800.0f,             // Distance from origin
+        {0, 0, 0, 255}       // Default black background (RGBA)
+    };
 
-    renderKernel<<<1, 1>>>(d_pixels, d_sphere, d_light, 380.0f, 750.0f);
+    // ========== LIGHT CONFIGURATION ==========
+    Vec3 lightPos = {WIDTH / 2.0f, HEIGHT * 0.8f, -1000.0f}; // Light source position
+    float lightWidth = WIDTH * 1.5f;                         // Area light size
 
+    // Generate a random seed for the frame
+    unsigned int frame_seed = static_cast<unsigned int>(time(nullptr));
+
+    // Launch the kernel with 1 block and 1 thread (sequential)
+    renderKernel<<<1, 1>>>(d_pixels, sphere, plane, lightPos, lightWidth, frame_seed);
     cudaDeviceSynchronize();
 
-    cudaMemcpy(pixels, d_pixels, WIDTH * HEIGHT * CHANNEL_NUM, cudaMemcpyDeviceToHost);
-    auto end = std::chrono::high_resolution_clock::now();
+    // Check for any CUDA errors
+    cudaError_t err = cudaGetLastError();
+    if (err != cudaSuccess)
+    {
+        std::cerr << "CUDA error: " << cudaGetErrorString(err) << std::endl;
+        return 1;
+    }
 
-    stbi_write_png("rainbow_cuda_seq.png", WIDTH, HEIGHT, CHANNEL_NUM, pixels, WIDTH * CHANNEL_NUM);
+    // Copy the result back to host memory
+    std::vector<unsigned char> pixels(WIDTH * HEIGHT * CHANNEL_NUM);
+    cudaMemcpy(pixels.data(), d_pixels, WIDTH * HEIGHT * CHANNEL_NUM, cudaMemcpyDeviceToHost);
+
+    // ========== OUTPUT AND TIMING ==========
+    auto end_time = std::chrono::high_resolution_clock::now();
+    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time).count();
+
+    // Save as PNG using stb_image
+    stbi_write_png("rainbow_cuda_seq.png", WIDTH, HEIGHT, CHANNEL_NUM, pixels.data(), WIDTH * CHANNEL_NUM);
 
     std::cout << "CUDA ray tracing completed." << std::endl;
     std::cout << "Image dimensions: " << WIDTH << "x" << HEIGHT << std::endl;
     std::cout << "Max bounces: " << MAX_BOUNCES << std::endl;
-    std::cout << "Execution time: " << std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count() << " ms.\n";
+    std::cout << "Execution time: " << duration << " ms" << std::endl;
+    std::cout << "Output saved to rainbow_cuda.png" << std::endl;
 
+    // Clean up
     cudaFree(d_pixels);
-    cudaFree(d_sphere);
-    cudaFree(d_light);
-    delete[] pixels;
 
-    std::cout << "Output saved to rainbow_cuda_seq.png\n";
-    std::cout << "Press Enter to exit...";
-    std::cin.ignore();
     return 0;
 }
