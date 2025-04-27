@@ -36,12 +36,12 @@ struct Sphere
     float radius;
 };
 
-// Light
-struct Light
+// Plane
+struct Plane
 {
-    Vec3 pos;
-    Vec3 dir;
-    float wavelength;
+    Vec3 normal;
+    float distance;
+    Color color;
 };
 
 Vec3 reflect(const Vec3 &I, const Vec3 &N);
@@ -50,6 +50,6 @@ Color wavelengthToRGB(float wavelength);
 Vec3 refract(const Vec3 &incident, const Vec3 &normal, float n1, float n2);
 float fresnel(const Vec3 &incident, const Vec3 &normal, float n1, float n2);
 float wavelengthToRefraction(float wavelength);
-Color traceRay(const Vec3 &origin, const Vec3 &dir, const Sphere &sphere, int maxBounces, float wavelength);
+Color traceRay(const Vec3 &origin, const Vec3 &dir, const Sphere &sphere, const Plane &plane, int maxBounces, float wavelength);
 
 #endif // RAINBOWRAYTRACER_H
