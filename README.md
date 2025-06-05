@@ -26,12 +26,28 @@ Use **vectorization** to follow multiple rays with each thread (CUDA) to improve
 
 ## Milestones
 
-- [ ] Correct implementation of the 3D geometry and refraction/reflection computation on the CPU
-- [ ] Correct implementation of the 3D geometry and refraction/reflection computation on the GPU (using CUDA)
-- [ ] Correct implementation of a vectorized version and performance comparison with the non-vectorized one
-- [ ] Color display as a static image file
+- [x] Correct implementation of the 3D geometry and refraction/reflection computation on the CPU
+- [x] Correct implementation of the 3D geometry and refraction/reflection computation on the GPU (using CUDA)
+- [x] Correct implementation of a vectorized version and performance comparison with the non-vectorized one
+- [x] Color display as a static image file
 - [ ] Color display with OpenGL on the screen, with interactively changeable viewing angle
-- [ ] Compute the intensity changes properly at the intersections using the Fresnel equations assuming unpolarized light
+- [x] Compute the intensity changes properly at the intersections using the Fresnel equations assuming unpolarized light
+
+## Benchmarks & Optimizations
+
+The following table shows the time it takes on different hardware to calculate the refraction & reflection of 300 light vectors (380 nm to 680 nm)
+
+| Hardware              | Execution time |
+|-----------------------|----------------|
+| CPU (Single Threaded) | 2168 s         |
+| GPU (Non-Vectorized)  | 4229 μs        |
+| GPU (Vectorized)      | 439 μs         |
+
+By assigning each pixel to a separate GPU thread, the renderer takes full advantage of the GPU’s parallel architecture, significantly reducing render time. Additionally, choosing a wavelength-based sampling method allowed for more physically accurate color representation and spectral effects, which are often lost in traditional RGB rendering. This design also naturally fit within the SIMD/SIMT model of CUDA, where each thread handles a vector of wavelengths efficiently. These choices were made to balance realism, performance, and hardware compatibility while keeping the code modular and extensible.
+
+- **Vectorization**: Each thread processes 4 wavelengths (`NUM_WAVELENGTHS`) to maximize register usage
+- **Memory Coalescing**: `TILE_SIZE=16` ensures aligned global memory access
+- **Loop Unrolling**: `#pragma unroll` in `renderKernel` reduces branch overhead
 
 ## Requirements
 
