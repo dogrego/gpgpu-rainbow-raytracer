@@ -39,7 +39,7 @@ The following table shows the time it takes on different hardware to calculate t
 
 | Hardware              | Execution time |
 |-----------------------|----------------|
-| CPU (Single Threaded) | 2168 s         |
+| CPU (Single Threaded) | 2168 μs         |
 | GPU (Non-Vectorized)  | 4229 μs        |
 | GPU (Vectorized)      | 439 μs         |
 
