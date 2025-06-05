@@ -52,5 +52,17 @@ By assigning each pixel to a separate GPU thread, the renderer takes full advant
 ## Requirements
 
 - Visual Studio 2022
+- CMake
 - NVIDIA CUDA Toolkit (12.8)
 - OpenGL
+
+## Tested On
+
+The following generous people have aided me in testing that the program runs on a variety of different hardware configurations:
+
+| Person         | CPU                 | GPU                         | OS                         |
+|----------------|---------------------|-----------------------------|----------------------------|
+| Dóra Gregorics | AMD Ryzen 5 2600X   | Nvidia GeForce RTX 2060 6GB | Windows 10 (22H2)          |
+| Márton Petes   | AMD Ryzen 5 3600    | Nvidia GeForce GTX 1060 6GB | NixOS 23.11 (6.3.4)        |
+| Márton Petes   | Intel Core i5-5200U | Nvidia GeForce 840M 2GB     | NixOS 23.05 (6.0.10-zen2)  |
+| Zoltán Balázs  | Intel Core i7-8700K | Nvidia GeForce RTX 2080 8GB | Arch Linux (6.3.5-arch1-1) |
